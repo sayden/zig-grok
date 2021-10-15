@@ -12,7 +12,13 @@ pub fn main() !void {
     var allocator = &arena.allocator;
     defer arena.deinit();
 
-    try execute(allocator, base_patterns, user_patterns, input_text);
+    var iter = try execute(base_patterns, user_patterns, input_text);
+    defer iter.deinit();
+
+    var buf: []u8 = try allocator.alloc(u8, 100);
+    while (try iter.next(buf[0..50], buf[50..])) |result| {
+        std.debug.print("Word: '{s}', Word: '{s}'\n", .{ result.match_type, result.str });
+    }
 }
 
 const Result = struct {
@@ -28,11 +34,13 @@ const Result = struct {
 };
 
 const Iterator = struct {
-    match: *g.grok_match_t,
+    match: g.grok_match_t,
+    grok: [*c]g.grok_t,
 
-    pub fn init(match: *g.grok_match_t) Iterator {
+    pub fn init(match: g.grok_match_t, grok: [*c]g.grok_t) Iterator {
         return Iterator{
             .match = match,
+            .grok = grok,
         };
     }
 
@@ -46,7 +54,7 @@ const Iterator = struct {
         var len: c_int = 0;
         var namelen: c_int = 0;
 
-        var res = g.grok_match_walk_next(self.match, name, &namelen, str, &len);
+        var res = g.grok_match_walk_next(&self.match, name, &namelen, str, &len);
         if (res == 1) {
             // EOF
             return null;
@@ -56,11 +64,15 @@ const Iterator = struct {
 
         return Result.init(t[0..@intCast(usize, namelen)], s[0..@intCast(usize, len)]);
     }
+
+    pub fn deinit(self: *Iterator) void {
+        g.free(self.grok);
+        // match is freed by the library
+    }
 };
 
-fn execute(allocator: *std.mem.Allocator, base_patterns: [*c]const u8, user_patterns: [*c]const u8, input_text: [*c]const u8) !void {
-    var mygrok = g.grok_new();
-    defer g.free(mygrok);
+fn execute(base_patterns: [*c]const u8, user_patterns: [*c]const u8, input_text: [*c]const u8) !Iterator {
+    var mygrok: [*c]g.grok_t = g.grok_new();
 
     var res = g.grok_patterns_import_from_file(mygrok, base_patterns);
     if (res != 0) {
@@ -86,11 +98,5 @@ fn execute(allocator: *std.mem.Allocator, base_patterns: [*c]const u8, user_patt
 
     g.grok_match_walk_init(&match);
 
-    var iter = Iterator.init(&match);
-
-    var buf: []u8 = try allocator.alloc(u8, 100);
-    defer allocator.free(buf);
-    while (try iter.next(buf[0..50], buf[50..])) |result| {
-        std.debug.print("Word: '{s}', Word: '{s}'\n", .{ result.match_type, result.str });
-    }
+    return Iterator.init(match, mygrok);
 }
