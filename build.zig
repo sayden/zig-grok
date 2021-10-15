@@ -9,7 +9,7 @@ pub fn build(b: *Builder) void {
 
     exe.linkSystemLibrary("grok");
     exe.linkLibC();
-
+    exe.output_dir = "bin";
     b.default_step.dependOn(&exe.step);
 
     const run_cmd = exe.run();
